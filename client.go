@@ -155,13 +155,13 @@ func (s *Client) Process(msgpars ...string) (reply *SpamDOut, err error) {
 	return s.simpleCall(PROCESS, msgpars)
 }
 
-//Same as PROCESS, but return only modified headers, not body (new in protocol 1.4) 
+//Same as PROCESS, but return only modified headers, not body (new in protocol 1.4)
 func (s *Client) Headers(msgpars ...string) (reply *SpamDOut, err error) {
 	return s.simpleCall(HEADERS, msgpars)
 }
 
 //Sign the message as spam
-func (s *Client) ReportingSpam(msgpars ...string) (reply *SpamDOut, err error) {
+func (s *Client) ReportSpam(msgpars ...string) (reply *SpamDOut, err error) {
 	headers := map[string]string{
 		"Message-class": "spam",
 		"Set":           "local,remote",
@@ -170,7 +170,7 @@ func (s *Client) ReportingSpam(msgpars ...string) (reply *SpamDOut, err error) {
 }
 
 //Sign the message as false-positive
-func (s *Client) RevokeSpam(msgpars ...string) (reply *SpamDOut, err error) {
+func (s *Client) ReportHam(msgpars ...string) (reply *SpamDOut, err error) {
 	headers := map[string]string{
 		"Message-class": "ham",
 		"Set":           "local,remote",
@@ -253,18 +253,18 @@ func (s *Client) call(cmd string, msgpars []string, onData FnCallback, extraHead
 	default:
 		if cmd != PING {
 			err = errors.New("Message parameters wrong size")
+                        return
 		} else {
 			msgpars = []string{""}
 		}
-		return
 	}
 
 	if cmd == REPORT_IGNOREWARNING {
 		cmd = REPORT
 	}
 
-	// Create a new connection
-	stream, err := net.Dial("tcp", s.Host)
+        // Create a new connection, with a reasonable timeout
+	stream, err := net.DialTimeout("tcp", s.Host, time.Duration(DEFAULT_TIMEOUT)*time.Second)
 
 	if err != nil {
 		err = errors.New("Connection dial error to spamd: " + err.Error())
@@ -313,11 +313,11 @@ func processResponse(cmd string, data *bufio.Reader) (returnObj *SpamDOut, err e
 	line, _, _ := data.ReadLine()
 	lineStr := string(line)
 
-	r := regexp.MustCompile(`(?i)SPAMD\/([0-9\.]+)\s([0-9]+)\s([0-9A-Z_]+)`)
+        r := regexp.MustCompile(`(?i)SPAMD\/([0-9\.\-]+)\s([0-9]+)\s([0-9A-Z_]+)`)
 	var result = r.FindStringSubmatch(lineStr)
 	if len(result) < 4 {
 		if cmd != "SKIP" {
-			err = errors.New("spamd unreconized reply:" + lineStr)
+			err = errors.New("spamd unrecognized reply:" + lineStr)
 		} else {
 			returnObj.Code = EX_OK
 			returnObj.Message = "SKIPPED"
@@ -429,7 +429,7 @@ func processResponse(cmd string, data *bufio.Reader) (returnObj *SpamDOut, err e
 					lineStr = string(line)
 
 					//TXT Table found, prepare to parse..
-					if lineStr[0:4] == TABLE_MARK {
+					if len(lineStr) >= 4 && lineStr[0:4] == TABLE_MARK {
 
 						section := []map[string]interface{}{}
 						tt := 0
